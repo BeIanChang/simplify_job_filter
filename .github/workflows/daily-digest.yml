@@ -1,7 +1,5 @@
 name: Daily Internship Digest
 
-name: Daily Internship Digest
-
 on:
   schedule:
     - cron: '0 13 * * *'
@@ -32,7 +30,10 @@ jobs:
           pip install requests
       - name: Run filter and email (diff only new)
         env:
-          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          SMTP_HOST: ${{ vars.SMTP_HOST || secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ vars.SMTP_PORT || secrets.SMTP_PORT }}
+          SMTP_USER: ${{ vars.SMTP_USER || secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           EMAIL_TO: ${{ vars.EMAIL_TO || secrets.EMAIL_TO }}
           EMAIL_FROM: ${{ vars.EMAIL_FROM || secrets.EMAIL_FROM }}
           LOCATION_ALLOWLIST: ${{ vars.LOCATION_ALLOWLIST }}

@@ -2,6 +2,8 @@ import os
 import os
 import re
 import html
+import smtplib
+from email.message import EmailMessage
 import requests
 from typing import List, Dict, Optional, Tuple
 
@@ -60,7 +62,16 @@ def parse_table(table_html: str) -> List[Dict[str, str]]:
     return rows
 
 
-def filter_rows(rows: List[Dict[str, str]], allow_locations: List[str], include_keywords: Optional[List[str]] = None, exclude_keywords: Optional[List[str]] = None) -> List[Dict[str, str]]:
+def is_canada_location(location: str) -> bool:
+    return "canada" in location.lower()
+
+
+def filter_rows(
+    rows: List[Dict[str, str]],
+    allow_locations: List[str],
+    include_keywords: Optional[List[str]] = None,
+    exclude_keywords: Optional[List[str]] = None,
+) -> List[Dict[str, str]]:
     def matches_location(loc: str) -> bool:
         norm = loc.lower()
         for allow in allow_locations:
@@ -98,10 +109,23 @@ def diff_new_rows(current: List[Dict[str, str]], previous: List[Dict[str, str]])
     return [r for r in current if unique_key(r) not in prev_keys]
 
 
-def format_plain(rows: List[Dict[str, str]]) -> str:
+def count_locations(rows: List[Dict[str, str]]) -> Tuple[int, int, int]:
+    total = len(rows)
+    canada = sum(1 for r in rows if is_canada_location(r.get("location", "")))
+    other = total - canada
+    return total, canada, other
+
+
+def format_plain(
+    rows: List[Dict[str, str]],
+    total_new: int,
+    canada_new: int,
+    other_new: int,
+) -> str:
+    stats_line = f"Stats: total new {total_new} | Canada {canada_new} | USA/other {other_new}"
     if not rows:
-        return "No new matching jobs today."
-    lines = []
+        return f"{stats_line}\nNo new matching jobs today."
+    lines = [stats_line]
     for r in rows:
         company = r.get("company", "")
         role = r.get("role", "")
@@ -118,20 +142,26 @@ def format_plain(rows: List[Dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
-def send_email(sendgrid_api_key: str, to_email: str, from_email: str, subject: str, body: str) -> None:
-    url = "https://api.sendgrid.com/v3/mail/send"
-    payload = {
-        "personalizations": [
-            {"to": [{"email": to_email}]}
-        ],
-        "from": {"email": from_email},
-        "subject": subject,
-        "content": [
-            {"type": "text/plain", "value": body}
-        ],
-    }
-    resp = requests.post(url, json=payload, headers={"Authorization": f"Bearer {sendgrid_api_key}"}, timeout=30)
-    resp.raise_for_status()
+def send_email_smtp(
+    smtp_host: str,
+    smtp_port: int,
+    smtp_user: str,
+    smtp_password: str,
+    to_email: str,
+    from_email: str,
+    subject: str,
+    body: str,
+) -> None:
+    msg = EmailMessage()
+    msg["From"] = from_email
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.set_content(body)
+
+    with smtplib.SMTP(smtp_host, smtp_port) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_password)
+        server.send_message(msg)
 
 
 def env_list(name: str) -> Optional[List[str]]:
@@ -142,11 +172,14 @@ def env_list(name: str) -> Optional[List[str]]:
 
 
 def main():
-    sendgrid_key = os.getenv("SENDGRID_API_KEY")
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_password = os.getenv("SMTP_PASSWORD")
     to_email = os.getenv("EMAIL_TO")
     from_email = os.getenv("EMAIL_FROM")
-    if not sendgrid_key or not to_email or not from_email:
-        raise SystemExit("Missing SENDGRID_API_KEY, EMAIL_TO, or EMAIL_FROM")
+    if not smtp_user or not smtp_password or not to_email or not from_email:
+        raise SystemExit("Missing SMTP_USER, SMTP_PASSWORD, EMAIL_TO, or EMAIL_FROM")
 
     branch = os.getenv("SOURCE_BRANCH", "dev")
     allow_locations = env_list("LOCATION_ALLOWLIST") or DEFAULT_ALLOW_LOCATIONS
@@ -172,9 +205,10 @@ def main():
 
     new_rows = diff_new_rows(current_rows, previous_rows)
     filtered = filter_rows(new_rows, allow_locations, include_keywords, exclude_keywords)
-    body = format_plain(filtered)
+    total_new, canada_new, other_new = count_locations(new_rows)
+    body = format_plain(filtered, total_new, canada_new, other_new)
     subject = f"Summer 2026 internships digest (new: {len(filtered)})"
-    send_email(sendgrid_key, to_email, from_email, subject, body)
+    send_email_smtp(smtp_host, smtp_port, smtp_user, smtp_password, to_email, from_email, subject, body)
 
 
 if __name__ == "__main__":
