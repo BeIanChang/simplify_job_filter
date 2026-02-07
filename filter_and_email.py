@@ -158,8 +158,10 @@ def send_email_smtp(
     msg["Subject"] = subject
     msg.set_content(body)
 
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+        server.ehlo()
         server.starttls()
+        server.ehlo()
         server.login(smtp_user, smtp_password)
         server.send_message(msg)
 
