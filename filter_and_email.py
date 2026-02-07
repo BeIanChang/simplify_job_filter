@@ -158,12 +158,19 @@ def send_email_smtp(
     msg["Subject"] = subject
     msg.set_content(body)
 
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(smtp_user, smtp_password)
-        server.send_message(msg)
+    use_ssl = os.getenv("SMTP_USE_SSL", "false").lower() in {"1", "true", "yes"}
+    if use_ssl:
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30) as server:
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+    else:
+        with smtplib.SMTP(timeout=30) as server:
+            server.connect(smtp_host, smtp_port)
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
 
 
 def env_list(name: str) -> Optional[List[str]]:
