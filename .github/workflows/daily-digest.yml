@@ -1,0 +1,43 @@
+name: Daily Internship Digest
+
+name: Daily Internship Digest
+
+on:
+  schedule:
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repo (scripts)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: main
+      - name: Checkout internships repo (target data)
+        uses: actions/checkout@v4
+        with:
+          repository: SimplifyJobs/Summer2026-Internships
+          ref: dev
+          path: internships
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+      - name: Run filter and email (diff only new)
+        env:
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          EMAIL_TO: ${{ vars.EMAIL_TO || secrets.EMAIL_TO }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM || secrets.EMAIL_FROM }}
+          LOCATION_ALLOWLIST: ${{ vars.LOCATION_ALLOWLIST }}
+          INCLUDE_KEYWORDS: ${{ vars.INCLUDE_KEYWORDS }}
+          EXCLUDE_KEYWORDS: ${{ vars.EXCLUDE_KEYWORDS }}
+          SOURCE_BRANCH: dev
+        run: |
+          python filter_and_email.py
