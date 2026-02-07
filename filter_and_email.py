@@ -28,13 +28,13 @@ def fetch_readme(ref: str = "dev") -> str:
     return resp.text
 
 
-def latest_two_shas(branch: str = "dev") -> List[str]:
+def latest_shas(branch: str = "dev", limit: int = 2) -> List[str]:
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits"
-    params = {"sha": branch, "per_page": 2}
+    params = {"sha": branch, "per_page": limit}
     resp = requests.get(url, params=params, timeout=30)
     resp.raise_for_status()
     commits = resp.json()
-    return [c["sha"] for c in commits][:2]
+    return [c["sha"] for c in commits][:limit]
 
 
 def extract_tables(readme: str) -> List[str]:
@@ -47,7 +47,10 @@ def parse_table(table_html: str) -> List[Dict[str, str]]:
     rows = []
     for m in row_re.finditer(table_html):
         cell_values = []
+        cell_links = []
         for raw_cell in cell_re.findall(m.group(1)):
+            link_match = re.search(r"href=\"(https?://[^\"]+)\"", raw_cell)
+            cell_links.append(link_match.group(1) if link_match else "")
             cleaned = re.sub(r"<br\s*/?>", " | ", raw_cell, flags=re.I)
             cleaned = html.unescape(re.sub(r"<[^>]+>", "", cleaned)).strip()
             cell_values.append(cleaned)
@@ -57,6 +60,7 @@ def parse_table(table_html: str) -> List[Dict[str, str]]:
                 "role": cell_values[1],
                 "location": cell_values[2],
                 "application": cell_values[3],
+                "application_url": cell_links[3] if len(cell_links) > 3 else "",
                 "age": cell_values[4],
             })
     return rows
@@ -116,6 +120,27 @@ def count_locations(rows: List[Dict[str, str]]) -> Tuple[int, int, int]:
     return total, canada, other
 
 
+def load_last_sha(path: str) -> Optional[str]:
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as handle:
+        return handle.read().strip() or None
+
+
+def save_last_sha(path: str, sha: str) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(sha)
+
+
+def get_commit_shas_since(branch: str, since_sha: Optional[str], limit: int = 30) -> List[str]:
+    shas = latest_shas(branch, limit=limit)
+    if since_sha and since_sha in shas:
+        index = shas.index(since_sha)
+        return shas[:index]
+    return shas
+
+
 def format_plain(
     rows: List[Dict[str, str]],
     total_new: int,
@@ -130,14 +155,15 @@ def format_plain(
         company = r.get("company", "")
         role = r.get("role", "")
         location = r.get("location", "")
-        app = r.get("application", "")
-        link = ""
-        url_match = re.search(r"https?://\S+", app)
-        if url_match:
-            link = url_match.group(0)
+        link = r.get("application_url", "")
+        if not link:
+            app = r.get("application", "")
+            url_match = re.search(r"https?://\S+", app)
+            if url_match:
+                link = url_match.group(0)
         line = f"{company} — {role} — {location}"
         if link:
-            line += f" — {link}"
+            line += f" — [Apply]({link})"
         lines.append(line)
     return "\n".join(lines)
 
@@ -158,14 +184,16 @@ def send_email_smtp(
     msg["Subject"] = subject
     msg.set_content(body)
 
+    if not smtp_host:
+        raise ValueError("SMTP_HOST is required and cannot be empty")
+
     use_ssl = os.getenv("SMTP_USE_SSL", "false").lower() in {"1", "true", "yes"}
     if use_ssl:
         with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30) as server:
             server.login(smtp_user, smtp_password)
             server.send_message(msg)
     else:
-        with smtplib.SMTP(timeout=30) as server:
-            server.connect(smtp_host, smtp_port)
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
             server.ehlo()
             server.starttls()
             server.ehlo()
@@ -196,19 +224,22 @@ def main():
     include_keywords = env_list("INCLUDE_KEYWORDS")
     exclude_keywords = env_list("EXCLUDE_KEYWORDS")
 
-    shas = latest_two_shas(branch)
-    current_ref = shas[0] if shas else branch
-    previous_ref = shas[1] if len(shas) > 1 else None
+    state_path = os.getenv("STATE_PATH", "state/last_sha.txt")
+    last_sha = load_last_sha(state_path)
+    shas = get_commit_shas_since(branch, last_sha, limit=30)
+    if not shas:
+        raise SystemExit("No commits found for branch")
 
-    current_readme = fetch_readme(ref=current_ref)
+    latest_sha = shas[0]
+    current_readme = fetch_readme(ref=latest_sha)
     tables_current = extract_tables(current_readme)
     if not tables_current:
         raise SystemExit("No tables found in current README")
     current_rows = parse_table(tables_current[0])
 
     previous_rows: List[Dict[str, str]] = []
-    if previous_ref:
-        prev_readme = fetch_readme(ref=previous_ref)
+    if last_sha:
+        prev_readme = fetch_readme(ref=last_sha)
         tables_prev = extract_tables(prev_readme)
         if tables_prev:
             previous_rows = parse_table(tables_prev[0])
@@ -219,6 +250,8 @@ def main():
     body = format_plain(filtered, total_new, canada_new, other_new)
     subject = f"Summer 2026 internships digest (new: {len(filtered)})"
     send_email_smtp(smtp_host, smtp_port, smtp_user, smtp_password, to_email, from_email, subject, body)
+
+    save_last_sha(state_path, latest_sha)
 
 
 if __name__ == "__main__":
