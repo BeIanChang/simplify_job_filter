@@ -227,10 +227,7 @@ def main():
     state_path = os.getenv("STATE_PATH", "state/last_sha.txt")
     last_sha = load_last_sha(state_path)
     shas = get_commit_shas_since(branch, last_sha, limit=30)
-    if not shas:
-        raise SystemExit("No commits found for branch")
-
-    latest_sha = shas[0]
+    latest_sha = shas[0] if shas else branch
     current_readme = fetch_readme(ref=latest_sha)
     tables_current = extract_tables(current_readme)
     if not tables_current:
