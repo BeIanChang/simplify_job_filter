@@ -49,8 +49,9 @@ def parse_table(table_html: str) -> List[Dict[str, str]]:
         cell_values = []
         cell_links = []
         for raw_cell in cell_re.findall(m.group(1)):
-            link_match = re.search(r"href=\"(https?://[^\"]+)\"", raw_cell)
-            cell_links.append(link_match.group(1) if link_match else "")
+            link_matches = re.findall(r"href=\"(https?://[^\"]+)\"", raw_cell)
+            simplify_link = next((link for link in link_matches if "simplify.jobs" in link), "")
+            cell_links.append(simplify_link or (link_matches[0] if link_matches else ""))
             cleaned = re.sub(r"<br\s*/?>", " | ", raw_cell, flags=re.I)
             cleaned = html.unescape(re.sub(r"<[^>]+>", "", cleaned)).strip()
             cell_values.append(cleaned)
@@ -163,9 +164,61 @@ def format_plain(
                 link = url_match.group(0)
         line = f"{company} — {role} — {location}"
         if link:
-            line += f" — [Apply]({link})"
+            line += f" — {link}"
         lines.append(line)
     return "\n".join(lines)
+
+
+def format_html(
+    rows: List[Dict[str, str]],
+    total_new: int,
+    canada_new: int,
+    other_new: int,
+) -> str:
+    stats_line = f"Stats: total new {total_new} | Canada {canada_new} | USA/other {other_new}"
+    if not rows:
+        return f"""
+        <html>
+          <body>
+            <p>{html.escape(stats_line)}</p>
+            <p>No new matching jobs today.</p>
+          </body>
+        </html>
+        """.strip()
+
+    lines = []
+    for r in rows:
+        company = html.escape(r.get("company", ""))
+        role = html.escape(r.get("role", ""))
+        location = html.escape(r.get("location", ""))
+        link = r.get("application_url", "")
+        if not link:
+            app = r.get("application", "")
+            url_match = re.search(r"https?://\S+", app)
+            if url_match:
+                link = url_match.group(0)
+        link_html = ""
+        if link:
+            link_html = (
+                f"<a href=\"{html.escape(link)}\" "
+                "style=\"display:inline-block;padding:6px 10px;"
+                "background:#2563eb;color:#ffffff;text-decoration:none;"
+                "border-radius:4px;font-size:12px;\">Apply</a>"
+            )
+        lines.append(
+            f"<li><strong>{company}</strong> — {role} — {location} {link_html}</li>"
+        )
+
+    return f"""
+    <html>
+      <body>
+        <p>{html.escape(stats_line)}</p>
+        <ul>
+          {''.join(lines)}
+        </ul>
+      </body>
+    </html>
+    """.strip()
 
 
 def send_email_smtp(
@@ -176,13 +229,15 @@ def send_email_smtp(
     to_email: str,
     from_email: str,
     subject: str,
-    body: str,
+    text_body: str,
+    html_body: str,
 ) -> None:
     msg = EmailMessage()
     msg["From"] = from_email
     msg["To"] = to_email
     msg["Subject"] = subject
-    msg.set_content(body)
+    msg.set_content(text_body)
+    msg.add_alternative(html_body, subtype="html")
 
     if not smtp_host:
         raise ValueError("SMTP_HOST is required and cannot be empty")
@@ -244,9 +299,20 @@ def main():
     new_rows = diff_new_rows(current_rows, previous_rows)
     filtered = filter_rows(new_rows, allow_locations, include_keywords, exclude_keywords)
     total_new, canada_new, other_new = count_locations(new_rows)
-    body = format_plain(filtered, total_new, canada_new, other_new)
+    text_body = format_plain(filtered, total_new, canada_new, other_new)
+    html_body = format_html(filtered, total_new, canada_new, other_new)
     subject = f"Summer 2026 internships digest (new: {len(filtered)})"
-    send_email_smtp(smtp_host, smtp_port, smtp_user, smtp_password, to_email, from_email, subject, body)
+    send_email_smtp(
+        smtp_host,
+        smtp_port,
+        smtp_user,
+        smtp_password,
+        to_email,
+        from_email,
+        subject,
+        text_body,
+        html_body,
+    )
 
     save_last_sha(state_path, latest_sha)
 
