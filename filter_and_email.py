@@ -181,7 +181,7 @@ def env_list(name: str) -> Optional[List[str]]:
 
 
 def main():
-    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_host = os.getenv("SMTP_HOST") or "smtp.gmail.com"
     smtp_port_value = os.getenv("SMTP_PORT")
     smtp_port = int(smtp_port_value) if smtp_port_value else 587
     smtp_user = os.getenv("SMTP_USER")
