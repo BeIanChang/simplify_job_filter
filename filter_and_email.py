@@ -326,7 +326,8 @@ def main():
     include_keywords = env_list("INCLUDE_KEYWORDS")
     exclude_keywords = env_list("EXCLUDE_KEYWORDS")
 
-    lookback_hours = int(os.getenv("LOOKBACK_HOURS", "24"))
+    lookback_hours_value = os.getenv("LOOKBACK_HOURS")
+    lookback_hours = int(lookback_hours_value) if lookback_hours_value else 24
     since = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
     since_iso = since.isoformat(timespec="seconds")
 
