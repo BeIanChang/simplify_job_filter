@@ -47,6 +47,7 @@ jobs:
           LOCATION_ALLOWLIST: ${{ vars.LOCATION_ALLOWLIST }}
           INCLUDE_KEYWORDS: ${{ vars.INCLUDE_KEYWORDS }}
           EXCLUDE_KEYWORDS: ${{ vars.EXCLUDE_KEYWORDS }}
+          LOOKBACK_HOURS: ${{ vars.LOOKBACK_HOURS }}
           SOURCE_BRANCH: dev
         run: |
           python filter_and_email.py

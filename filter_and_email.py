@@ -4,17 +4,11 @@ import re
 import html
 import smtplib
 from email.message import EmailMessage
+from datetime import datetime, timedelta, timezone
 import requests
 from typing import List, Dict, Optional, Tuple
 
-DEFAULT_ALLOW_LOCATIONS = [
-    "Canada",
-    "Remote (Canada)",
-    "Remote (Canada/US)",
-    "Remote (Canada/USA)",
-    "Remote Canada",
-    "Remote - Canada",
-]
+DEFAULT_ALLOW_LOCATIONS: List[str] = []
 
 REPO_OWNER = "SimplifyJobs"
 REPO_NAME = "Summer2026-Internships"
@@ -67,17 +61,68 @@ def parse_table(table_html: str) -> List[Dict[str, str]]:
     return rows
 
 
+def parse_tables(readme: str) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    for table_html in extract_tables(readme):
+        rows.extend(parse_table(table_html))
+    return rows
+
+
+CANADA_TOKENS = [
+    "canada",
+    "ontario",
+    "british columbia",
+    "alberta",
+    "manitoba",
+    "saskatchewan",
+    "quebec",
+    "nova scotia",
+    "new brunswick",
+    "newfoundland",
+    "labrador",
+    "prince edward island",
+    "pei",
+    "northwest territories",
+    "yukon",
+    "nunavut",
+]
+
+CANADA_ABBREVIATIONS = [
+    "ON",
+    "BC",
+    "AB",
+    "MB",
+    "SK",
+    "QC",
+    "NS",
+    "NB",
+    "NL",
+    "PE",
+    "NT",
+    "YT",
+    "NU",
+]
+
+
 def is_canada_location(location: str) -> bool:
-    return "canada" in location.lower()
+    lower = location.lower()
+    if any(token in lower for token in CANADA_TOKENS):
+        return True
+    for abbr in CANADA_ABBREVIATIONS:
+        if re.search(rf"\b{abbr}\b", location):
+            return True
+    return False
 
 
 def filter_rows(
     rows: List[Dict[str, str]],
-    allow_locations: List[str],
+    allow_locations: Optional[List[str]],
     include_keywords: Optional[List[str]] = None,
     exclude_keywords: Optional[List[str]] = None,
 ) -> List[Dict[str, str]]:
     def matches_location(loc: str) -> bool:
+        if not allow_locations:
+            return is_canada_location(loc)
         norm = loc.lower()
         for allow in allow_locations:
             if allow.lower() in norm:
@@ -134,12 +179,13 @@ def save_last_sha(path: str, sha: str) -> None:
         handle.write(sha)
 
 
-def get_commit_shas_since(branch: str, since_sha: Optional[str], limit: int = 30) -> List[str]:
-    shas = latest_shas(branch, limit=limit)
-    if since_sha and since_sha in shas:
-        index = shas.index(since_sha)
-        return shas[:index]
-    return shas
+def get_commits_since_time(branch: str, since_iso: str, limit: int = 50) -> List[str]:
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits"
+    params = {"sha": branch, "per_page": limit, "since": since_iso}
+    resp = requests.get(url, params=params, timeout=30)
+    resp.raise_for_status()
+    commits = resp.json()
+    return [c["sha"] for c in commits]
 
 
 def format_plain(
@@ -275,29 +321,30 @@ def main():
         raise SystemExit("Missing SMTP_USER, SMTP_PASSWORD, EMAIL_TO, or EMAIL_FROM")
 
     branch = os.getenv("SOURCE_BRANCH", "dev")
-    allow_locations = env_list("LOCATION_ALLOWLIST") or DEFAULT_ALLOW_LOCATIONS
+    allow_locations = env_list("LOCATION_ALLOWLIST")
+    filter_by_location = os.getenv("FILTER_BY_LOCATION", "true").lower() in {"1", "true", "yes"}
     include_keywords = env_list("INCLUDE_KEYWORDS")
     exclude_keywords = env_list("EXCLUDE_KEYWORDS")
 
-    state_path = os.getenv("STATE_PATH", "state/last_sha.txt")
-    last_sha = load_last_sha(state_path)
-    shas = get_commit_shas_since(branch, last_sha, limit=30)
+    lookback_hours = int(os.getenv("LOOKBACK_HOURS", "24"))
+    since = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+    since_iso = since.isoformat(timespec="seconds")
+
+    shas = get_commits_since_time(branch, since_iso, limit=100)
     latest_sha = shas[0] if shas else branch
     current_readme = fetch_readme(ref=latest_sha)
-    tables_current = extract_tables(current_readme)
-    if not tables_current:
+    current_rows = parse_tables(current_readme)
+    if not current_rows:
         raise SystemExit("No tables found in current README")
-    current_rows = parse_table(tables_current[0])
 
     previous_rows: List[Dict[str, str]] = []
-    if last_sha:
-        prev_readme = fetch_readme(ref=last_sha)
-        tables_prev = extract_tables(prev_readme)
-        if tables_prev:
-            previous_rows = parse_table(tables_prev[0])
+    if shas and len(shas) > 1:
+        previous_ref = shas[-1]
+        prev_readme = fetch_readme(ref=previous_ref)
+        previous_rows = parse_tables(prev_readme)
 
     new_rows = diff_new_rows(current_rows, previous_rows)
-    filtered = filter_rows(new_rows, allow_locations, include_keywords, exclude_keywords)
+    filtered = filter_rows(new_rows, allow_locations if filter_by_location else None, include_keywords, exclude_keywords)
     total_new, canada_new, other_new = count_locations(new_rows)
     text_body = format_plain(filtered, total_new, canada_new, other_new)
     html_body = format_html(filtered, total_new, canada_new, other_new)
@@ -313,8 +360,6 @@ def main():
         text_body,
         html_body,
     )
-
-    save_last_sha(state_path, latest_sha)
 
 
 if __name__ == "__main__":
