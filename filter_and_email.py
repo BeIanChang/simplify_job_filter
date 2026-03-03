@@ -45,6 +45,7 @@ def parse_table(table_html: str) -> List[Dict[str, str]]:
     row_re = re.compile(r"<tr>(.*?)</tr>", re.S)
     cell_re = re.compile(r"<t[dh]>(.*?)</t[dh]>", re.S)
     rows = []
+    last_company = ""
     for m in row_re.finditer(table_html):
         cell_values = []
         cell_links = []
@@ -56,10 +57,18 @@ def parse_table(table_html: str) -> List[Dict[str, str]]:
             cleaned = html.unescape(re.sub(r"<[^>]+>", "", cleaned)).strip()
             cell_values.append(cleaned)
         if len(cell_values) == 5 and cell_values[0] != "Company":
+            company = cell_values[0]
+            if company == "↳" or company == "":
+                company = last_company
+            else:
+                last_company = company
+            role = cell_values[1]
+            if role.startswith("↳"):
+                role = role.lstrip("↳").strip()
             rows.append({
-                "company": cell_values[0],
-                "role": cell_values[1],
-                "location": cell_values[2],
+                "company": company,
+                "role": role,
+                "location": cell_values[2].lstrip("↳").strip(),
                 "application": cell_values[3],
                 "application_url": cell_links[3] if len(cell_links) > 3 else "",
                 "age": cell_values[4],
