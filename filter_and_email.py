@@ -1,5 +1,4 @@
 import os
-import os
 import re
 import html
 import smtplib
@@ -22,10 +21,17 @@ def fetch_readme(ref: str = "dev") -> str:
     return resp.text
 
 
+def github_headers() -> Dict[str, str]:
+    token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
+    if not token:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
+
+
 def latest_shas(branch: str = "dev", limit: int = 2) -> List[str]:
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits"
     params = {"sha": branch, "per_page": limit}
-    resp = requests.get(url, params=params, timeout=30)
+    resp = requests.get(url, params=params, headers=github_headers(), timeout=30)
     resp.raise_for_status()
     commits = resp.json()
     return [c["sha"] for c in commits][:limit]
@@ -182,7 +188,7 @@ def save_last_sha(path: str, sha: str) -> None:
 def get_commits_since_time(branch: str, since_iso: str, limit: int = 50) -> List[str]:
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits"
     params = {"sha": branch, "per_page": limit, "since": since_iso}
-    resp = requests.get(url, params=params, timeout=30)
+    resp = requests.get(url, params=params, headers=github_headers(), timeout=30)
     resp.raise_for_status()
     commits = resp.json()
     return [c["sha"] for c in commits]
@@ -252,16 +258,14 @@ def format_html(
                 "border-radius:4px;font-size:12px;\">Apply</a>"
             )
         lines.append(
-            f"<li><strong>{company}</strong> — {role} — {location} {link_html}</li>"
+            f"<div><strong>{company}</strong> — {role} — {location} {link_html}</div>"
         )
 
     return f"""
     <html>
       <body>
         <p>{html.escape(stats_line)}</p>
-        <ul>
-          {''.join(lines)}
-        </ul>
+        {''.join(lines)}
       </body>
     </html>
     """.strip()
@@ -332,6 +336,9 @@ def main():
     since_iso = since.isoformat(timespec="seconds")
 
     shas = get_commits_since_time(branch, since_iso, limit=100)
+    print(f"Lookback since {since_iso}, commits found: {len(shas)}")
+    if shas:
+        print(f"Newest SHA: {shas[0]} | Oldest SHA: {shas[-1]}")
     latest_sha = shas[0] if shas else branch
     current_readme = fetch_readme(ref=latest_sha)
     current_rows = parse_tables(current_readme)
