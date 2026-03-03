@@ -176,6 +176,34 @@ def diff_new_rows(current: List[Dict[str, str]], previous: List[Dict[str, str]])
     return [r for r in current if unique_key(r) not in prev_keys]
 
 
+def group_key(row: Dict[str, str]) -> Tuple[str, str, str]:
+    return (
+        row.get("company", "").strip(),
+        row.get("role", "").strip(),
+        row.get("location", "").strip(),
+    )
+
+
+def expand_related_rows(
+    new_rows: List[Dict[str, str]],
+    current_rows: List[Dict[str, str]],
+) -> List[Dict[str, str]]:
+    grouped: Dict[Tuple[str, str, str], List[Dict[str, str]]] = {}
+    for row in current_rows:
+        grouped.setdefault(group_key(row), []).append(row)
+
+    expanded: List[Dict[str, str]] = []
+    seen = set()
+    for row in new_rows:
+        for related in grouped.get(group_key(row), [row]):
+            key = unique_key(related)
+            if key in seen:
+                continue
+            seen.add(key)
+            expanded.append(related)
+    return expanded
+
+
 def dedupe_rows(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
     seen = set()
     deduped = []
@@ -375,7 +403,8 @@ def main():
         previous_rows = parse_tables(prev_readme)
 
     new_rows = diff_new_rows(current_rows, previous_rows)
-    filtered = filter_rows(new_rows, allow_locations if filter_by_location else None, include_keywords, exclude_keywords)
+    expanded_rows = expand_related_rows(new_rows, current_rows)
+    filtered = filter_rows(expanded_rows, allow_locations if filter_by_location else None, include_keywords, exclude_keywords)
     total_new, canada_new, other_new = count_locations(new_rows)
     text_body = format_plain(filtered, total_new, canada_new, other_new)
     html_body = format_html(filtered, total_new, canada_new, other_new)
