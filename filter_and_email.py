@@ -163,11 +163,13 @@ def filter_rows(
 
 def unique_key(row: Dict[str, str]) -> Tuple[str, str, str, str]:
     link = row.get("application_url", "").strip() or row.get("application", "").strip()
+    if link:
+        return (link, "", "", "")
     return (
         row.get("company", "").strip(),
         row.get("role", "").strip(),
         row.get("location", "").strip(),
-        link,
+        "",
     )
 
 
