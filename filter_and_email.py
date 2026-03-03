@@ -163,13 +163,11 @@ def filter_rows(
 
 def unique_key(row: Dict[str, str]) -> Tuple[str, str, str, str]:
     link = row.get("application_url", "").strip() or row.get("application", "").strip()
-    if link:
-        return (link, "", "", "")
     return (
         row.get("company", "").strip(),
         row.get("role", "").strip(),
         row.get("location", "").strip(),
-        "",
+        link,
     )
 
 
@@ -376,8 +374,8 @@ def main():
         prev_readme = fetch_readme(ref=previous_ref)
         previous_rows = parse_tables(prev_readme)
 
-    new_rows = dedupe_rows(diff_new_rows(current_rows, previous_rows))
-    filtered = dedupe_rows(filter_rows(new_rows, allow_locations if filter_by_location else None, include_keywords, exclude_keywords))
+    new_rows = diff_new_rows(current_rows, previous_rows)
+    filtered = filter_rows(new_rows, allow_locations if filter_by_location else None, include_keywords, exclude_keywords)
     total_new, canada_new, other_new = count_locations(new_rows)
     text_body = format_plain(filtered, total_new, canada_new, other_new)
     html_body = format_html(filtered, total_new, canada_new, other_new)
