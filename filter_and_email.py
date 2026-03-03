@@ -214,7 +214,7 @@ def format_plain(
             url_match = re.search(r"https?://\S+", app)
             if url_match:
                 link = url_match.group(0)
-        line = f"{company} — {role} — {location}"
+        line = f"{company} | {role} | {location}"
         if link:
             line += f" — {link}"
         lines.append(line)
@@ -258,7 +258,7 @@ def format_html(
                 "border-radius:4px;font-size:12px;\">Apply</a>"
             )
         lines.append(
-            f"<div><strong>{company}</strong> — {role} — {location} {link_html}</div>"
+            f"<div><strong>{company}</strong> | {role} | {location} {link_html}</div>"
         )
 
     return f"""
